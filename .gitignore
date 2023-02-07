@@ -1,0 +1,11 @@
+*.json
+*.ndjson
+*.memmap
+*.pkl
+*.npy
+notebooks/
+
+*.pyc
+__pycache__/
+
+.idea/
