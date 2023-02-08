@@ -4,6 +4,7 @@
 *.pkl
 *.npy
 notebooks/
+data/
 
 *.pyc
 __pycache__/

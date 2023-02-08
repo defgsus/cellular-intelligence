@@ -1,6 +1,8 @@
 import gzip
 import json
+import os
 from io import BytesIO
+import argparse
 from pathlib import Path
 from multiprocessing.pool import Pool
 from typing import Tuple, Iterable, List
@@ -16,6 +18,9 @@ from src.gen import *
 from src.util.image import np_to_pil
 
 
+DATA_PATH = Path(__file__).resolve().parent.parent / "data"
+
+
 def iter_automaton_rules():
     for i in range(2**18):
         r1 = i & (2**9-1)
@@ -25,7 +30,7 @@ def iter_automaton_rules():
         if r2:
             yield "-".join((
                 "".join(str(r) for r in r1),
-                "".join(str(r) for r in r1),
+                "".join(str(r) for r in r2),
             ))
 
 
@@ -58,13 +63,13 @@ def run_feature_extraction(
         nfft: int = 1024,
         tqdm_pos: int = 0,
 ):
-    Path(f"{filename_part}-rules.json").write_text(json.dumps({
+    (DATA_PATH / f"{filename_part}-rules.json").write_text(json.dumps({
         "rules": rules,
         "nfft": nfft,
         "num_steps": num_steps,
     }))
     data_map = np.memmap(
-        filename=f"{filename_part}.memmap",
+        filename=str(DATA_PATH / f"{filename_part}.memmap"),
         dtype="float32",
         mode="w+",
         shape=(len(rules), nfft // 2),
@@ -96,12 +101,16 @@ def run_feature_extraction_multiproc(filename_part: str, num_processes: int = 10
     pool.map(_run_feature_extraction_multiproc, process_args)
 
 
-def combine_multiproc_features(filename_part: str, dtype="float32"):
-    filename_part = Path(filename_part)
+def combine_multiproc_features(
+        filename_part: str,
+        dtype="float32",
+        remove_zeros: bool = True,
+):
+    filename_part = DATA_PATH / filename_part
 
     all_data = []
     all_rules = []
-    for filename in tqdm(sorted(filename_part.parent.glob(f"{filename_part.name}-proc-*-rules.json"))):
+    for filename in sorted(filename_part.parent.glob(f"{filename_part.name}-proc-*-rules.json")):
         rules_data = json.loads(Path(filename).read_text())
         filename = f"{str(filename)[:-11]}.memmap"
         data_map = np.memmap(
@@ -115,12 +124,38 @@ def combine_multiproc_features(filename_part: str, dtype="float32"):
         all_rules.extend(rules_data["rules"])
 
     all_data = np.concatenate(all_data, axis=0)
-    print("combined", all_data.shape, len(all_rules))
+    all_rules = np.array(all_rules)
+    print("combined", all_data.shape, all_rules.shape)
+
+    if remove_zeros:
+        zeros = all_data.sum(axis=1) == 0
+        all_data = all_data[np.invert(zeros)]
+        all_rules = all_rules[np.invert(zeros)]
+        print("without zeros", all_data.shape)
+
+    df = pd.DataFrame(all_data, index=all_rules)
+    print(df)
+    df.to_pickle(f"{filename_part}-df.pkl")
 
 
 def main():
+    global DATA_PATH
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "-p", "--path", nargs="?", type=str, default=str(DATA_PATH),
+        help=f"output path, defaults to {DATA_PATH}"
+    )
+    parser.add_argument(
+        "-j", "--processes", nargs="?", type=int, default=4,
+        help="number of parallel processes",
+    )
+    args = parser.parse_args()
+    DATA_PATH = Path(args.path)
+    os.makedirs(DATA_PATH, exist_ok=True)
+
     name = "ca-specs"
-    #run_feature_extraction_multiproc(name)
+    run_feature_extraction_multiproc(name, num_processes=args.processes)
     combine_multiproc_features(name)
 
 
