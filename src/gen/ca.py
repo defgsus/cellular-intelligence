@@ -34,7 +34,8 @@ class CARule(GeneratorRule):
     def apply(self, data: np.ndarray, count: Optional[int] = None, border: Optional[str] = None) -> np.ndarray:
         if border is None:
             border = self.border
-        count = count if count is not None else self.count
+        if count is None:
+            count = self.count
 
         for i in range(count):
             neigh = total_neighbours(data, border)
@@ -48,6 +49,59 @@ class CARule(GeneratorRule):
                     new_state |= dead & (neigh == num_n)
                 for num_n in self.rule[1]:
                     new_state |= alive & (neigh == num_n)
+
+            data = new_state.astype(data.dtype)
+
+        return data
+
+    @classmethod
+    def iter_automaton_rules(cls):
+        for i in range(2 ** 18):
+            r1 = i & (2 ** 9-1)
+            r2 = (i >> 9) & (2**9-1)
+            r1 = [b for b in range(9) if (r1 >> b) & 1]
+            r2 = [b for b in range(9) if (r2 >> b) & 1]
+            if r2:
+                yield "-".join((
+                    "".join(str(r) for r in r1),
+                    "".join(str(r) for r in r2),
+                ))
+
+
+class CA2Rule(GeneratorRule):
+
+    def __init__(
+            self,
+            rule: Tuple[Dict[int, int], Dict[int, int]] = ({3:1}, {2:1, 3:1}),
+            count: int = 1,
+            border: str = "zero",
+    ):
+        assert border in ("zero", "wrap", "symm")
+
+        self.rule = rule
+        self.count = count
+        self.border = border
+
+    def apply(self, data: np.ndarray, count: Optional[int] = None, border: Optional[str] = None) -> np.ndarray:
+        if border is None:
+            border = self.border
+        if count is None:
+            count = self.count
+
+        for i in range(count):
+            neigh = total_neighbours(data, border)
+            dead = data == 0
+            alive = np.invert(dead)
+
+            new_state = np.zeros(data.shape, dtype=data.dtype)
+
+            if self.rule[1]:
+                for num_n, value in self.rule[0].items():
+                    match = dead & (neigh == num_n)
+                    new_state[match] = value
+                for num_n, value in self.rule[1].items():
+                    match = alive & (neigh == num_n)
+                    new_state[match] = value
 
             data = new_state.astype(data.dtype)
 

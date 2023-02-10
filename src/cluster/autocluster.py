@@ -56,10 +56,17 @@ class AutoCluster(ClusterMixin, BaseEstimator):
     def partial_fit_transform(self, X: np.ndarray, y=None) -> np.ndarray:
         return self.partial_fit(X, y, return_labels=True)
 
+    def fit_predict(self, X: np.ndarray, y=None) -> np.ndarray:
+        return self.fit(X, y).transform(X)
+
+    def partial_fit_predict(self, X: np.ndarray, y=None) -> np.ndarray:
+        return self.partial_fit(X, y, return_labels=True)
+
     def partial_fit(
             self,
             X: np.ndarray,
             y=None,
+            counts: Optional[np.ndarray] = None,
             return_labels: bool = False,
     ) -> Union["AutoCluster", np.ndarray]:
         X = self._validate_data(
@@ -67,6 +74,12 @@ class AutoCluster(ClusterMixin, BaseEstimator):
             dtype=[np.float64, np.float32, np.bool_],
             reset=self.cluster_centers_ is None,
         )
+        if counts is not None:
+            if counts.ndim != 1:
+                raise ValueError(f"`counts` must have 1 dimension, got {counts.ndim}")
+            if counts.shape[0] != X.shape[0]:
+                raise ValueError(f"Expected `counts` to be of length {X.shape[0]}, got {counts.shape[0]}")
+
         # random_state = check_random_state(self.random_state)
         if return_labels:
             labels = np.ndarray((X.shape[0], ), dtype=self.label_dtype)
@@ -75,8 +88,13 @@ class AutoCluster(ClusterMixin, BaseEstimator):
         while X.shape[0]:
             if self.cluster_centers_ is None:
                 # create first cluster
+                if counts is None:
+                    count = 1
+                else:
+                    count = counts[0]
+                    counts = counts[1:]
                 self.cluster_centers_ = np.copy(X[0]).reshape(1, -1)
-                self.cluster_counts_ = np.array([1], dtype=self.label_dtype)
+                self.cluster_counts_ = np.array([count], dtype=self.label_dtype)
                 X = X[1:]
                 if return_labels:
                     labels[label_idx] = 0
@@ -95,8 +113,13 @@ class AutoCluster(ClusterMixin, BaseEstimator):
                         self.cluster_centers_, (cluster_id + 1, self.cluster_centers_.shape[1])
                     )
                     self.cluster_counts_ = np.resize(self.cluster_counts_, (cluster_id + 1, ))
+                    if counts is None:
+                        count = 1
+                    else:
+                        count = counts[0]
+                        counts = counts[idx + 1:]
                     self.cluster_centers_[cluster_id] = feature
-                    self.cluster_counts_[cluster_id] = 1
+                    self.cluster_counts_[cluster_id] = count
                     X = X[idx + 1:]
                     if return_labels:
                         labels[label_idx] = cluster_id
@@ -104,7 +127,12 @@ class AutoCluster(ClusterMixin, BaseEstimator):
                     # start again with new distance matrix
                     break
 
-                self._add_to_cluster(cluster_id, feature)
+                if counts is None:
+                    count = 1
+                else:
+                    count = counts[idx]
+
+                self._add_to_cluster(cluster_id, feature, count)
                 if return_labels:
                     labels[label_idx] = cluster_id
                     label_idx += 1
@@ -127,20 +155,24 @@ class AutoCluster(ClusterMixin, BaseEstimator):
         best_ids = np.argmin(distances, axis=-1)
         return best_ids
 
-    def _add_to_cluster(self, cluster_id: int, feature: np.ndarray):
-        count = self.cluster_counts_[cluster_id]
+    def predict(self, X: np.ndarray) -> np.ndarray:
+        return self.transform(X)
+
+    def _add_to_cluster(self, cluster_id: int, feature: np.ndarray, count: int):
+        cur_count = self.cluster_counts_[cluster_id]
+
         if self.cluster_centers_.dtype == np.bool_:
             self.cluster_centers_[cluster_id] = (
                 ((
-                    self.cluster_centers_[cluster_id].astype("float64") * count
-                    + feature.astype("float64")
-                ) / (count + 1)).astype("bool")
+                    self.cluster_centers_[cluster_id].astype("float64") * cur_count
+                    + feature.astype("float64") * count
+                ) / (cur_count + count)).astype("bool")
             )
         else:
             self.cluster_centers_[cluster_id] = (
-                (self.cluster_centers_[cluster_id] * count + feature) / (count + 1)
+                (self.cluster_centers_[cluster_id] * cur_count + feature * count) / (cur_count + count)
             )
-        self.cluster_counts_[cluster_id] = count + 1
+        self.cluster_counts_[cluster_id] = cur_count + count
 
     def _distance_metric(self, X: np.ndarray):
         return pairwise.pairwise_distances(
@@ -149,3 +181,28 @@ class AutoCluster(ClusterMixin, BaseEstimator):
             metric=self.distance_metric,
         )
 
+    def reduce_clusters(self, below: int) -> "AutoCluster":
+        """
+        Remove clusters whose count is below `below`
+        :param below: int
+        :return: self
+        """
+        if self.cluster_counts_ is None:
+            return self
+
+        remove_index = self.cluster_counts_ < below
+        keep_index = np.invert(remove_index)
+
+        X = self.cluster_centers_[remove_index]
+        counts = self.cluster_counts_[remove_index]
+
+        self.cluster_centers_ = self.cluster_centers_[keep_index]
+        self.cluster_counts_ = self.cluster_counts_[keep_index]
+
+        prev_max_n_clusters = self.max_n_clusters
+        self.max_n_clusters = max(1, self.n_clusters_)
+
+        self.partial_fit(X, counts=counts)
+
+        self.max_n_clusters = prev_max_n_clusters
+        return self

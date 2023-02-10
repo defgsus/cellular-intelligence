@@ -3,8 +3,11 @@
 *.memmap
 *.pkl
 *.npy
+*.pt
 notebooks/
 data/
+checkpoints/
+runs/
 
 *.pyc
 __pycache__/

@@ -68,3 +68,25 @@ class TestAutoCluster(TestBase):
 
             labels2 = cluster.transform(features)
             self.assertEqual(labels1, labels2)
+
+    def test_400_reduce(self):
+        for seed in range(20):
+            seed = (seed + 7) * 13
+            rng = np.random.RandomState(seed)
+
+            cluster = AutoCluster(
+                distance_threshold=1.,
+                max_n_clusters=30,
+                distance_metric="euclidean",
+            )
+
+            features = rng.rand(100, 10)
+            cluster.fit_transform(features)
+            num_samples = cluster.cluster_counts_.sum()
+            num_clusters = cluster.n_clusters_
+            num_small_clusters = np.sum(cluster.cluster_counts_ <= 2)
+            self.assertGreaterEqual(num_small_clusters, 3)
+
+            cluster.reduce_clusters(below=3)
+            self.assertEqual(num_samples, cluster.cluster_counts_.sum())
+            self.assertEqual(num_clusters - num_small_clusters, cluster.n_clusters_)

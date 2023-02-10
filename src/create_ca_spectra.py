@@ -21,17 +21,6 @@ from src.util.image import np_to_pil
 DATA_PATH = Path(__file__).resolve().parent.parent / "data"
 
 
-def iter_automaton_rules():
-    for i in range(2**18):
-        r1 = i & (2**9-1)
-        r2 = (i >> 9) & (2**9-1)
-        r1 = [b for b in range(9) if (r1 >> b) & 1]
-        r2 = [b for b in range(9) if (r2 >> b) & 1]
-        if r2:
-            yield "-".join((
-                "".join(str(r) for r in r1),
-                "".join(str(r) for r in r2),
-            ))
 
 
 def get_spectrum(
@@ -155,7 +144,7 @@ def main():
     os.makedirs(DATA_PATH, exist_ok=True)
 
     name = "ca-specs"
-    run_feature_extraction_multiproc(name, num_processes=args.processes)
+    # run_feature_extraction_multiproc(name, num_processes=args.processes)
     combine_multiproc_features(name)
 
 

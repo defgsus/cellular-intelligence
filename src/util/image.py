@@ -1,5 +1,5 @@
 import math
-from typing import Tuple, List
+from typing import Tuple, List, Optional
 
 import numpy as np
 import PIL.Image
@@ -17,6 +17,7 @@ class Mosaic:
             count: int,
             shape: Tuple[int, int],
             pad: Tuple[int, int] = (2, 2),
+            num_x: Optional[int] = None,
             max_width: int = 2000,
     ):
         self.count = count
@@ -25,11 +26,15 @@ class Mosaic:
         self.shape_pad = (self.shape[-2] + self.pad[-2] * 2, self.shape[-1] + self.pad[-1] * 2)
         self.max_width = max_width
 
-        edge = int(math.sqrt(self.count))
-        self.num_x = int(max(
-            min(self.max_width * .75, self.shape_pad[-1] * self.count),
-            min(self.max_width, edge * self.shape_pad[-1])
-        ) / self.shape_pad[1])
+        if num_x is not None:
+            self.num_x = min(num_x, self.count)
+        else:
+            edge = int(math.sqrt(self.count))
+            self.num_x = int(max(
+                min(self.max_width * .75, self.shape_pad[-1] * self.count),
+                min(self.max_width, edge * self.shape_pad[-1])
+            ) / self.shape_pad[1])
+
         self.num_y = max(1, int(math.ceil(self.count / self.num_x)))
         self.image = np.zeros((self.shape_pad[-2] * self.num_y, self.shape_pad[-1] * self.num_x))
 
