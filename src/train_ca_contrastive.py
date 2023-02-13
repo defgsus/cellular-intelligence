@@ -257,16 +257,16 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "name", type=str,
-        help="name of the output files for checkpoints and tensorbord logs"
+        help="name of the output files for checkpoints and tensorboard logs"
     )
     parser.add_argument(
         "-r", "--reset", type=bool, nargs="?", default=False, const="True",
-        help="Delete previous checkpoint"
+        help="Delete previous checkpoint and logs"
     )
     args = parser.parse_args()
 
     name = args.name
-    model = ContrastiveEncoder(
+    model = ContrastiveEncoder2(
         base_channel_size=128,  # was 32
     ).to(device)
     if hasattr(model, "init_weights"):

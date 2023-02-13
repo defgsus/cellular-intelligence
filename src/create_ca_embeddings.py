@@ -13,33 +13,50 @@ import scipy.stats
 import scipy.signal
 import PIL.Image
 from tqdm import tqdm
+import torch
 
 from src.gen import *
+from src.nn.contrastive import ContrastiveEncoder
+from src.nn.trainer import CHECKPOINT_PATH
 from src.util.image import np_to_pil
 
 
-DATA_PATH = Path(__file__).resolve().parent.parent / "data"
+MODEL_NAME = "contra-ca-02"
+#MODEL_NAME = "contra-ca-03-ch128"
+
+DATA_PATH = Path(__file__).resolve().parent.parent / "data" / MODEL_NAME
 
 
-def get_spectrum(
-        gen: Generator,
-        shape: Tuple[int, int] = (64, 64),
-        count: int = 300,
-        nfft: int = 1024,
-):
-    result = dict()
+class Embedder:
 
-    specs = []
-    for idx in range(count):
-        state = gen.generate(shape=shape)
+    def __init__(self, latent_dim=64):
+        self.latent_dim = latent_dim
+        self.model = ContrastiveEncoder(
+            #base_channel_size=128,
+            latent_dim=self.latent_dim,
+        )
+        checkpoint = torch.load(CHECKPOINT_PATH / f"{MODEL_NAME}-snapshot.pt")
+        self.model.load_state_dict(checkpoint["state_dict"])
 
-        _, spec = scipy.signal.periodogram(state.flatten(), nfft=nfft)
-        specs.append(spec[1:].reshape(1, -1))
+    def get_embeddings(
+            self,
+            generators: List[Generator],
+            count: int = 5,
+            shape=(32, 32),
+    ):
+        embeddings = torch.zeros((len(generators), self.latent_dim))
+        for idx in range(count):
+            states = torch.zeros((len(generators), 1, shape[0], shape[1]))
 
-    specs = np.concatenate([spec.reshape(1, -1) for spec in specs], axis=0)
-    spec_mean = specs.mean(axis=0)
+            for i, gen in enumerate(generators):
+                state = torch.Tensor(gen.generate(shape=shape))
+                states[i, 0] = state
 
-    return spec_mean
+            with torch.no_grad():
+                embeddings += self.model.forward(states)
+
+        embeddings /= count
+        return embeddings.numpy()
 
 
 def run_feature_extraction(
@@ -47,27 +64,33 @@ def run_feature_extraction(
         rules: List[str],
         random_prob: float = .1,
         num_steps: int = 100,
-        nfft: int = 1024,
         tqdm_pos: int = 0,
 ):
+    embedder = Embedder()
+
     (DATA_PATH / f"{filename_part}-rules.json").write_text(json.dumps({
         "rules": rules,
-        "nfft": nfft,
+        "latent_dim": embedder.latent_dim,
         "num_steps": num_steps,
     }))
     data_map = np.memmap(
         filename=str(DATA_PATH / f"{filename_part}.memmap"),
         dtype="float32",
         mode="w+",
-        shape=(len(rules), nfft // 2),
+        shape=(len(rules), embedder.latent_dim),
     )
-    for idx, rule in enumerate(tqdm(rules, desc=filename_part, position=tqdm_pos)):
-        gen = Generator([
-            RandomDots(probability=random_prob),
-            CARule(rule, count=num_steps, border="wrap"),
-        ])
-        spectrum = get_spectrum(gen, nfft=nfft)
-        data_map[idx] = spectrum
+    batch_size = 128
+
+    for idx in tqdm(range(0, len(rules), batch_size), desc=filename_part, position=tqdm_pos):
+        generators = [
+            Generator([
+                RandomDots(probability=random_prob),
+                CARule(rule, count=num_steps, border="wrap"),
+            ])
+            for rule in rules[idx:idx + batch_size]
+        ]
+        embeddings = embedder.get_embeddings(generators)
+        data_map[idx:idx + embeddings.shape[0]] = embeddings
 
 
 def _run_feature_extraction_multiproc(args: Tuple[str, List[str], int]):
@@ -104,7 +127,7 @@ def combine_multiproc_features(
             filename=filename,
             dtype=dtype,
             mode="r",
-            shape=(len(rules_data["rules"]), rules_data["nfft"] // 2),
+            shape=(len(rules_data["rules"]), rules_data["latent_dim"]),
         )
         print(filename, data_map.shape)
         all_data.append(data_map)
@@ -141,8 +164,8 @@ def main():
     DATA_PATH = Path(args.path)
     os.makedirs(DATA_PATH, exist_ok=True)
 
-    name = "ca-specs"
-    # run_feature_extraction_multiproc(name, num_processes=args.processes)
+    name = f"ca-embeddings-{MODEL_NAME}"
+    #run_feature_extraction_multiproc(name, num_processes=args.processes)
     combine_multiproc_features(name)
 
 

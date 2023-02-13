@@ -49,6 +49,10 @@ class CARule(GeneratorRule):
                     new_state |= dead & (neigh == num_n)
                 for num_n in self.rule[1]:
                     new_state |= alive & (neigh == num_n)
+                # Note:
+                # also tried the following which is not faster, rather a bit slower:
+                #   match = dead & (neigh == num_n)
+                #   new_state[match] = 1
 
             data = new_state.astype(data.dtype)
 

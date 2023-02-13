@@ -4,7 +4,7 @@ import shutil
 import time
 from pathlib import Path
 import argparse
-from typing import Type, Tuple, Set, Optional
+from typing import Type, Tuple, Set, Optional, Union
 
 import numpy as np
 from tqdm import tqdm
@@ -29,7 +29,7 @@ class Trainer:
             self,
             filename_part: str,
             model: torch.nn.Module,
-            datasource,
+            datasource: Union[torch.utils.data.DataLoader, object],
 
             num_epochs: int = 5,
             batch_size: int = 128,
